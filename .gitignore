@@ -1,0 +1,26 @@
+# Bytecode y compilación
+*.class
+out/
+bin/
+build/
+target/
+
+# Documentación generada localmente (se publica en Actions)
+javadoc/
+docs/
+
+# Archivos de entorno y SO
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# Logs y temporales
+*.log
+*.tmp

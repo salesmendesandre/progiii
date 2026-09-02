@@ -1,0 +1,125 @@
+name: Build, Javadoc & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Compile Java Sources
+        run: |
+          mkdir -p out
+          javac --release 11 -d out src/es/usal/progiii/tools/*.java src/es/usal/progiii/test/*.java
+
+      - name: Run Test Suite
+        run: |
+          java -ea -cp out es.usal.progiii.test.TestProgiiiTools
+
+      - name: Package JAR (Binaries & Sources)
+        run: |
+          mkdir -p target/META-INF
+          echo "Manifest-Version: 1.0" > target/META-INF/MANIFEST.MF
+          echo "Created-By: PROGIII Tools 1.0.0 (Java 11+ Compatible)" >> target/META-INF/MANIFEST.MF
+          echo "Specification-Title: PROGIII Tools Library - Universidad de Salamanca (USAL)" >> target/META-INF/MANIFEST.MF
+          echo "Specification-Version: 1.0.0" >> target/META-INF/MANIFEST.MF
+          
+          # Copy compiled classes (excluding tests)
+          cp -r out/es target/
+          rm -rf target/es/usal/progiii/test
+          
+          # Copy source files for embedded source inspection in IDEs
+          cp -r src/es/usal/progiii/tools target/es/usal/progiii/
+          
+          cd target
+          jar cvfm ../biblioteca_progiii.jar META-INF/MANIFEST.MF es/
+          cd ..
+
+      - name: Generate Javadoc HTML
+        run: |
+          mkdir -p docs
+          javadoc -d docs -sourcepath src es.usal.progiii.tools \
+            -encoding UTF-8 -docencoding UTF-8 -charset UTF-8 \
+            -windowtitle "PROGIII Tools API Reference — USAL" \
+            -doctitle "PROGIII Tools — Universidad de Salamanca (USAL)" \
+            -author -version
+          
+          # Disable Jekyll completely to serve pure Javadoc static files
+          touch docs/.nojekyll
+          
+          # Patch index.html for safe redirect regardless of trailing slash in URL
+          cat << 'EOF' > docs/index.html
+          <!DOCTYPE HTML>
+          <html lang="es">
+          <head>
+          <title>PROGIII Tools API Reference — USAL</title>
+          <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <script type="text/javascript">
+            var path = window.location.pathname;
+            if (!path.endsWith('/')) {
+              path += '/';
+            }
+            window.location.replace(window.location.origin + path + 'es/usal/progiii/tools/package-summary.html');
+          </script>
+          <noscript>
+            <meta http-equiv="Refresh" content="0; url=es/usal/progiii/tools/package-summary.html">
+          </noscript>
+          </head>
+          <body>
+            <p>Redirigiendo a la <a href="es/usal/progiii/tools/package-summary.html">documentación de PROGIII Tools</a>...</p>
+          </body>
+          </html>
+          EOF
+          
+          # Create compatibility subfolder so both '/ (root)' and '/docs' selections work
+          mkdir -p docs/docs
+          cp -r docs/*.html docs/*.css docs/*.js docs/*.svg docs/element-list docs/legal docs/resources docs/script-dir docs/es docs/docs/ 2>/dev/null || true
+
+      - name: Archive Javadoc
+        run: |
+          zip -r progiii-javadoc.zip docs/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            biblioteca_progiii.jar
+            progiii-javadoc.zip
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy Javadoc to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          enable_jekyll: false
